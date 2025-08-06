@@ -1,9 +1,13 @@
 from utils.alert_manager import AlertManager
 from modules.detector.face_detector import FaceDetector
-from modules.analyzer.sleepiness_analyzer import SleepinessAnalyzer
+from modules.analyzer.event_logger import EventLogger # Changed import
 from modules.calibrator.calibrator import Calibrator
 import cv2
 import time
+import dashboard_server # New import
+import threading # New import
+import datetime # New import
+import os # New import
 
 def main():
     # --- Configurações Iniciais ---
@@ -11,6 +15,21 @@ def main():
     face_detector = FaceDetector()
     alert_manager = AlertManager()
     calibrator = Calibrator()
+
+    # Ensure reports directory exists
+    reports_dir = "reports"
+    if not os.path.exists(reports_dir):
+        os.makedirs(reports_dir)
+
+    # Generate unique session ID for this session
+    session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Start Flask dashboard server in a separate thread
+    dashboard_thread = threading.Thread(target=dashboard_server.run_dashboard_server, args=(session_id,))
+    dashboard_thread.daemon = True # Allow main program to exit even if thread is running
+    dashboard_thread.start()
+    print(f"Dashboard server started at http://127.0.0.1:5000, current session ID: {session_id}")
+
 
     # --- Loop de Calibração ---
     while not calibrator.calibration_done:
@@ -42,7 +61,8 @@ def main():
     # --- Finalização da Calibração ---
     cv2.destroyWindow("Calibracao")
     EAR_THRESHOLD, MAR_THRESHOLD = calibrator.calculate_thresholds()
-    sleepiness_analyzer = SleepinessAnalyzer(EAR_THRESHOLD, MAR_THRESHOLD)
+    # Initialize EventLogger with the calculated thresholds and session ID
+    sleepiness_analyzer = EventLogger(session_id, EAR_THRESHOLD, MAR_THRESHOLD) # Changed class name and added session_id
     print(f"Limiares calculados - EAR: {EAR_THRESHOLD:.2f}, MAR: {MAR_THRESHOLD:.2f}")
 
     # --- Configurações do Sistema Principal ---
@@ -76,7 +96,7 @@ def main():
                 if eye_closed_start_time is None:
                     eye_closed_start_time = current_time
                 elif current_time - eye_closed_start_time >= EYE_CLOSED_THRESHOLD:
-                    sleepiness_analyzer.add_event("olhos", current_time)
+                    sleepiness_analyzer.add_event("olhos", current_time, avg_ear) # Added avg_ear
                     alert_manager.trigger_alert(frame, "ALERTA: OLHOS FECHADOS!", (x, y - 70))
                     eye_closed_start_time = None
             else:
@@ -91,7 +111,7 @@ def main():
                 if mouth_open_start_time is None:
                     mouth_open_start_time = current_time
                 elif current_time - mouth_open_start_time >= MOUTH_OPEN_THRESHOLD:
-                    sleepiness_analyzer.add_event("bocejo", current_time)
+                    sleepiness_analyzer.add_event("bocejo", current_time, mar) # Added mar
                     alert_manager.trigger_alert(frame, "BOCEJO DETECTADO!", (x, y - 130))
                     mouth_open_start_time = None
             else:

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Sonolência</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 1200px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #0056b3; }
+        .session-selector { text-align: center; margin-bottom: 20px; }
+        .session-selector label { font-weight: bold; margin-right: 10px; }
+        .session-selector select { padding: 8px; border-radius: 5px; border: 1px solid #ccc; }
+        .kpis { display: flex; justify-content: space-around; margin-bottom: 20px; }
+        .kpi-card { background: #e9ecef; padding: 15px; border-radius: 5px; text-align: center; flex: 1; margin: 0 10px; }
+        .kpi-card h2 { margin: 0; font-size: 1.2em; color: #555; }
+        .kpi-card p { font-size: 2em; font-weight: bold; color: #007bff; margin-top: 5px; }
+        .chart-container { margin-top: 30px; }
+        canvas { background: #fff; padding: 10px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Dashboard de Monitoramento de Sonolência</h1>
+
+        <div class="session-selector">
+            <label for="sessionSelect">Selecionar Sessão:</label>
+            <select id="sessionSelect"></select>
+        </div>
+
+        <div class="kpis">
+            <div class="kpi-card">
+                <h2>Total de Eventos</h2>
+                <p id="totalEvents">0</p>
+            </div>
+            <div class="kpi-card">
+                <h2>Bocejos</h2>
+                <p id="totalYawns">0</p>
+            </div>
+            <div class="kpi-card">
+                <h2>Olhos Fechados</h2>
+                <p id="totalEyeClosed">0</p>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="eventChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const totalEventsElem = document.getElementById('totalEvents');
+        const totalYawnsElem = document.getElementById('totalYawns');
+        const totalEyeClosedElem = document.getElementById('totalEyeClosed');
+        const sessionSelect = document.getElementById('sessionSelect');
+        const ctx = document.getElementById('eventChart').getContext('2d');
+
+        let eventChart; // Variável para armazenar a instância do Chart.js
+
+        // Função para carregar as sessões disponíveis
+        async function loadSessions() {
+            try {
+                const response = await fetch('/api/sessions');
+                const sessions = await response.json();
+                
+                sessionSelect.innerHTML = ''; // Limpa opções existentes
+                if (sessions.length === 0) {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'Nenhuma sessão disponível';
+                    sessionSelect.appendChild(option);
+                    sessionSelect.disabled = true;
+                    return;
+                }
+
+                sessions.forEach(session_id => {
+                    const option = document.createElement('option');
+                    option.value = session_id;
+                    option.textContent = session_id;
+                    sessionSelect.appendChild(option);
+                });
+
+                // Seleciona a última sessão por padrão
+                sessionSelect.value = sessions[sessions.length - 1];
+                sessionSelect.disabled = false;
+                updateDashboard(sessionSelect.value); // Carrega os dados da sessão mais recente
+
+            } catch (error) {
+                console.error('Erro ao carregar sessões:', error);
+                sessionSelect.disabled = true;
+            }
+        }
+
+        // Função para atualizar o dashboard com base na sessão selecionada
+        function updateDashboard(session_id) {
+            fetch(`/api/events?session_id=${session_id}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error("Erro ao buscar dados:", data.error);
+                        return;
+                    }
+
+                    const timestamps = [];
+                    const eventTypes = [];
+                    let totalEvents = 0;
+                    let totalYawns = 0;
+                    let totalEyeClosed = 0;
+
+                    data.forEach(event => {
+                        timestamps.push(new Date(event.timestamp * 1000).toLocaleTimeString()); // Converte timestamp para hora legível
+                        eventTypes.push(event.event_type);
+                        totalEvents++;
+                        if (event.event_type === 'bocejo') {
+                            totalYawns++;
+                        } else if (event.event_type === 'olhos') {
+                            totalEyeClosed++;
+                        }
+                    });
+
+                    totalEventsElem.textContent = totalEvents;
+                    totalYawnsElem.textContent = totalYawns;
+                    totalEyeClosedElem.textContent = totalEyeClosed;
+
+                    // Destrói o gráfico existente antes de criar um novo para evitar sobreposição
+                    if (eventChart) {
+                        eventChart.destroy();
+                    }
+
+                    eventChart = new Chart(ctx, {
+                        type: 'bar', // Pode ser 'line', 'bar', etc.
+                        data: {
+                            labels: timestamps,
+                            datasets: [{
+                                label: 'Eventos de Sonolência',
+                                data: eventTypes.map(type => type === 'bocejo' ? 1 : 2), // 1 para bocejo, 2 para olhos fechados
+                                backgroundColor: eventTypes.map(type => type === 'bocejo' ? 'rgba(255, 99, 132, 0.6)' : 'rgba(54, 162, 235, 0.6)'),
+                                borderColor: eventTypes.map(type => type === 'bocejo' ? 'rgba(255, 99, 132, 1)' : 'rgba(54, 162, 235, 1)'),
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                        callback: function(value, index, values) {
+                                            if (value === 1) return 'Bocejo';
+                                            if (value === 2) return 'Olhos Fechados';
+                                            return '';
+                                        }
+                                    }
+                                }
+                            },
+                            responsive: true,
+                            maintainAspectRatio: false
+                        }
+                    });
+                })
+                .catch(error => console.error('Erro ao buscar dados da API:', error));
+        }
+
+        // Event listener para mudança de sessão
+        sessionSelect.addEventListener('change', (event) => {
+            updateDashboard(event.target.value);
+        });
+
+        // Carrega as sessões e o dashboard inicial ao carregar a página
+        loadSessions();
+        // Atualiza o dashboard da sessão selecionada a cada 2 segundos
+        setInterval(() => {
+            if (sessionSelect.value) {
+                updateDashboard(sessionSelect.value);
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
