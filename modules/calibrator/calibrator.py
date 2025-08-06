@@ -30,7 +30,9 @@ class Calibrator:
     def add_sample(self, ear, mar):
         if not self.calibration_done:
             if self.current_phase == 0:
-                self.ear_resting.append(ear)
+                # Apenas adiciona amostras de EAR se os olhos estiverem visivelmente abertos
+                if ear > 0.22:
+                    self.ear_resting.append(ear)
                 self.mar_resting.append(mar)
             elif self.current_phase == 1 and ear < 0.2:
                 self.ear_active.append(ear)
