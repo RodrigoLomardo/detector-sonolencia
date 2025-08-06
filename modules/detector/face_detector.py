@@ -49,7 +49,7 @@ class FaceDetector:
       
       EAR = (A + B) / (2.0 * C)
       return EAR
-    
+   
     #calculo do MAR (Mouth Aspect Ratio)
     def calculate_mar(self, landmarks, mouth_points):
       """calcula o mouth aspect ratio (MAR) para os pontos da boca. (detecta bocejos)"""

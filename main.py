@@ -1,6 +1,7 @@
 from utils.alert_manager import AlertManager
 from modules.detector.face_detector import FaceDetector
 from modules.analyzer.sleepiness_analyzer import SleepinessAnalyzer
+from modules.calibrator.calibrator import Calibrator
 import cv2
 import time
 
@@ -9,22 +10,56 @@ def main():
     cap = cv2.VideoCapture(0)
     face_detector = FaceDetector()
     alert_manager = AlertManager()
-    sleepiness_analyzer = SleepinessAnalyzer(ear_threshold=0.2, mar_threshold=0.5)
+    calibrator = Calibrator()
 
-    # Configurações de temporização
-    EYE_CLOSED_THRESHOLD = 2.0  # Tempo mínimo para considerar olhos fechados
-    MOUTH_OPEN_THRESHOLD = 2.0   # Tempo mínimo para considerar bocejo
-    SONOLENCIA_THRESHOLD = 3     # Número mínimo de eventos para alerta grave
-    
+    # Configurações padrão (serão sobrescritas pela calibração)
+    EAR_THRESHOLD = 0.25
+    MAR_THRESHOLD = 0.5
+    EYE_CLOSED_THRESHOLD = 2.0
+    MOUTH_OPEN_THRESHOLD = 2.0
+    SONOLENCIA_THRESHOLD = 3
+
     # Variáveis de estado
     eye_closed_start_time = None
     mouth_open_start_time = None
-    
+    calibration_complete = False
+
+    # Loop principal
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
+        
+        
+        if not calibration_complete:
+            calibrator.update_phase()
+            instruction = calibrator.get_instructions()
+    
+            cv2.putText(frame, instruction, (20, 30), 
+               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            cv2.putText(frame, f"Fase: {calibrator.current_phase + 1}/3", (20, 70),
+               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+            faces = face_detector.detect_faces(frame)
+            if len(faces) == 1:
+                landmarks = face_detector.get_landmarks(frame, faces[0])
+                ear = face_detector.calculate_ear(landmarks, face_detector.LEFT_EYE_POINTS)
+                mar = face_detector.calculate_mar(landmarks, face_detector.MOUTH_POINTS)
+                calibrator.add_sample(ear, mar)
+
+            if calibrator.calibration_done:
+                EAR_THRESHOLD, MAR_THRESHOLD = calibrator.calculate_thresholds()
+                sleepiness_analyzer = SleepinessAnalyzer(EAR_THRESHOLD, MAR_THRESHOLD)
+                calibration_complete = True
+                print(f"Limiares calculados - EAR: {EAR_THRESHOLD:.2f}, MAR: {MAR_THRESHOLD:.2f}")
+
+            cv2.imshow("Calibracao", frame)
+            if cv2.waitKey(1) == ord('q'):
+                break
+            continue
+        
+        # Sistema principal (após calibração)
         faces = face_detector.detect_faces(frame)
         
         for face in faces:
@@ -38,10 +73,9 @@ def main():
             left_ear = face_detector.calculate_ear(landmarks, face_detector.LEFT_EYE_POINTS)
             right_ear = face_detector.calculate_ear(landmarks, face_detector.RIGHT_EYE_POINTS)
             avg_ear = (left_ear + right_ear) / 2.0
-            cv2.putText(frame, f"EAR: {avg_ear:.2f}", (x, y - 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            
 
-            if avg_ear < 0.25:
+            if avg_ear < EAR_THRESHOLD:
                 if eye_closed_start_time is None:
                     eye_closed_start_time = current_time
                 elif current_time - eye_closed_start_time >= EYE_CLOSED_THRESHOLD:
@@ -53,10 +87,10 @@ def main():
 
             # Análise MAR
             mar = face_detector.calculate_mar(landmarks, face_detector.MOUTH_POINTS)
-            cv2.putText(frame, f"MAR: {mar:.2f}", (x, y - 100), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            cv2.putText(frame, f"MAR: {mar:.2f} (Limiar: {MAR_THRESHOLD:.2f})", 
+                       (x, y - 100), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-            if mar > 0.5:
+            if mar > MAR_THRESHOLD:
                 if mouth_open_start_time is None:
                     mouth_open_start_time = current_time
                 elif current_time - mouth_open_start_time >= MOUTH_OPEN_THRESHOLD:
